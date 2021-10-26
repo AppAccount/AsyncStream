@@ -8,7 +8,6 @@ final class AsyncStreamTests: XCTestCase {
     var runLoopTask: Task<(), Error>?
 
     override func setUp() {
-        print(#function)
         var optionalInputStream: InputStream?
         var optionalOutputStream: OutputStream?
         Stream.getBoundStreams(withBufferSize: Self.streamBufferSize, inputStream: &optionalInputStream, outputStream: &optionalOutputStream)

@@ -43,8 +43,8 @@ public actor InputStreamActor: NSObject {
             yield = { data in
                 continuation.yield(data)
             }
-            finish = {
-                continuation.finish(throwing: self.input.streamError)
+            finish = { [weak self] in
+                continuation.finish(throwing: self?.input.streamError)
             }
         }
     }
@@ -66,7 +66,6 @@ public actor InputStreamActor: NSObject {
     }
     
     deinit {
-        print(#function)
         input.close()
         input.remove(from: RunLoop.current, forMode: RunLoop.Mode.default)
         input.delegate = nil

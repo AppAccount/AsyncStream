@@ -46,8 +46,8 @@ public actor OutputStreamActor: NSObject {
             yield = { spaceAvailable in
                 continuation.yield(spaceAvailable)
             }
-            finish = {
-                continuation.finish(throwing: self.output.streamError)
+            finish = { [weak self] in
+                continuation.finish(throwing: self?.output.streamError)
             }
         }
     }
@@ -83,7 +83,6 @@ public actor OutputStreamActor: NSObject {
     }
     
     deinit {
-        print(#function)
         output.close()
         output.remove(from: RunLoop.current, forMode: RunLoop.Mode.default)
         output.delegate = nil
