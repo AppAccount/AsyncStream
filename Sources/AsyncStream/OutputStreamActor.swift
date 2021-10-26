@@ -41,32 +41,31 @@ public actor OutputStreamActor: NSObject {
         output.open()
     }
     
-    func getSpaceAvailableStream()-> AsyncStream<Bool> {
-        AsyncStream<Bool> { continuation in
+    func getSpaceAvailableStream()-> AsyncThrowingStream<Bool, Error> {
+        AsyncThrowingStream<Bool, Error> { continuation in
             yield = { spaceAvailable in
                 continuation.yield(spaceAvailable)
             }
             finish = {
-                continuation.finish()
+                continuation.finish(throwing: self.output.streamError)
             }
         }
     }
     
-    func write(_ data: Data) async throws -> Int {
+    func write(_ data: Data) throws -> Int {
         guard output.streamStatus == Stream.Status.open else {
             throw StreamActorError.NotOpen
         }
         var totalBytesWritten = 0
         try data.withUnsafeBytes { unsafeRawBufferPointer in
             while output.hasSpaceAvailable == true && totalBytesWritten < data.count {
-                try Task.checkCancellation()
                 guard let unsafeBasePointer = unsafeRawBufferPointer.bindMemory(to: UInt8.self).baseAddress else {
                     fatalError()
                 }
                 let unsafePointer = unsafeBasePointer + totalBytesWritten
                 let bytesWritten = output.write(unsafePointer, maxLength: data.count - totalBytesWritten)
                 if bytesWritten == -1 {
-                    throw StreamActorError.WriteError
+                    throw output.streamError ?? StreamActorError.WriteError
                 }
                 if bytesWritten > 0 {
                     totalBytesWritten += bytesWritten
@@ -96,11 +95,21 @@ extension OutputStreamActor: StreamDelegate {
         guard aStream is OutputStream else {
             fatalError("\(#function) Expected OutputStream")
         }
+#if DEBUG
         print(#function, "OutputStream" , eventCode)
+#endif
         switch eventCode {
         case Stream.Event.hasSpaceAvailable:
             Task.detached { [weak self] in
                 await self?.hasSpaceAvailable(true)
+            }
+        case Stream.Event.errorOccurred:
+            Task.detached { [weak self] in
+                await self?.finish?()
+            }
+        case Stream.Event.endEncountered:
+            Task.detached { [weak self] in
+                await self?.finish?()
             }
         default:
             break
