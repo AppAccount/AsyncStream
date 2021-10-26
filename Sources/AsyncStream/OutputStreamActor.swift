@@ -33,7 +33,7 @@ public actor OutputStreamActor: NSObject {
     private var yield: ((Bool)->())?
     private var finish:(()->())?
     
-    init(_ output: OutputStream) {
+    public init(_ output: OutputStream) {
         self.output = output
         super.init()
         output.delegate = self
@@ -41,7 +41,7 @@ public actor OutputStreamActor: NSObject {
         output.open()
     }
     
-    func getSpaceAvailableStream()-> AsyncThrowingStream<Bool, Error> {
+    public func getSpaceAvailableStream()-> AsyncThrowingStream<Bool, Error> {
         AsyncThrowingStream<Bool, Error> { continuation in
             yield = { spaceAvailable in
                 continuation.yield(spaceAvailable)
@@ -52,7 +52,7 @@ public actor OutputStreamActor: NSObject {
         }
     }
     
-    func write(_ data: Data) throws -> Int {
+    public func write(_ data: Data) throws -> Int {
         guard output.streamStatus == Stream.Status.open else {
             throw StreamActorError.NotOpen
         }

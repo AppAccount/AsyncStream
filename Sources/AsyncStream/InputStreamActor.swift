@@ -30,7 +30,7 @@ public actor InputStreamActor: NSObject {
     private var yield: ((Data)->())?
     private var finish:(()->())?
     
-    init(_ input: InputStream) {
+    public init(_ input: InputStream) {
         self.input = input
         super.init()
         self.input.delegate = self
@@ -38,7 +38,7 @@ public actor InputStreamActor: NSObject {
         self.input.open()
     }
     
-    func getReadDataStream() -> AsyncThrowingStream<Data, Error> {
+    public func getReadDataStream() -> AsyncThrowingStream<Data, Error> {
         AsyncThrowingStream<Data, Error> { continuation in
             yield = { data in
                 continuation.yield(data)
@@ -49,7 +49,7 @@ public actor InputStreamActor: NSObject {
         }
     }
     
-    func read() {
+    private func read() {
         var readData = Data()
         let bufferSize = Self.singleReadBufferSize
         var buffer = [UInt8](repeating: 0, count: bufferSize)

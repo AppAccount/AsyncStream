@@ -1,5 +1,5 @@
 import XCTest
-@testable import AsyncStream
+import AsyncStream
 
 final class AsyncStreamTests: XCTestCase {
     static var streamBufferSize = 4096
