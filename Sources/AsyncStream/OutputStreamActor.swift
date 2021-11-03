@@ -86,6 +86,7 @@ public actor OutputStreamActor: NSObject {
         output.close()
         output.remove(from: RunLoop.current, forMode: RunLoop.Mode.default)
         output.delegate = nil
+        finish?()
     }
 }
 
