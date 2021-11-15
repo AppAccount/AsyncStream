@@ -58,10 +58,10 @@ public actor OutputStreamActor: NSObject {
         }
         var totalBytesWritten = 0
         try data.withUnsafeBytes { unsafeRawBufferPointer in
+            guard let unsafeBasePointer = unsafeRawBufferPointer.bindMemory(to: UInt8.self).baseAddress else {
+                fatalError()
+            }
             while output.hasSpaceAvailable == true && totalBytesWritten < data.count {
-                guard let unsafeBasePointer = unsafeRawBufferPointer.bindMemory(to: UInt8.self).baseAddress else {
-                    fatalError()
-                }
                 let unsafePointer = unsafeBasePointer + totalBytesWritten
                 let bytesWritten = output.write(unsafePointer, maxLength: data.count - totalBytesWritten)
                 if bytesWritten == -1 {
