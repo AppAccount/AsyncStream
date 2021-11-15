@@ -26,7 +26,7 @@ import Foundation
 public actor InputStreamActor: NSObject {
     static var singleReadBufferSize = 4096
 
-    let input: InputStream
+    private let input: InputStream
     private var yield: ((Data)->())?
     private var finish:(()->())?
     

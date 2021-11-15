@@ -29,7 +29,7 @@ public enum StreamActorError: Error {
 }
 
 public actor OutputStreamActor: NSObject {
-    let output: OutputStream
+    private let output: OutputStream
     private var yield: ((Bool)->())?
     private var finish:(()->())?
     
