@@ -144,4 +144,52 @@ final class AsyncStreamTests: XCTestCase {
             try await taskGroup.waitForAll()
         }
     }
+    
+    func testWriteToClosedStream() async throws {
+        let outputActor = OutputStreamActor(outputStream)
+        let writeReadyStream = await outputActor.getSpaceAvailableStream()
+        for try await _ in writeReadyStream {
+            outputStream.close()
+            let size = Self.streamBufferSize >> 2
+            let data = Data.init(count: size)
+            do {
+                let _ = try await outputActor.write(data)
+            } catch (let error) {
+                guard let error = error as? StreamActorError, error == .NotOpen else {
+                    XCTFail()
+                    return
+                }
+                break
+            }
+        }
+    }
+    
+    func testReadStreamFinish() async throws {
+        let outputActor = OutputStreamActor(outputStream)
+        let writeReadyStream = await outputActor.getSpaceAvailableStream()
+        let inputActor = InputStreamActor(inputStream)
+        let readStream = await inputActor.getReadDataStream()
+        try await withThrowingTaskGroup(of: Void.self) { taskGroup in
+            taskGroup.addTask {
+                var closed = false
+                for try await _ in readStream {
+                    if !closed {
+                        closed = true
+                        self.outputStream.close()
+                    }
+                }
+            }
+            taskGroup.addTask {
+                for try await writeReady in writeReadyStream {
+                    if writeReady {
+                        let size = Self.streamBufferSize >> 2
+                        let data = Data.init(count: size)
+                        let _ = try await outputActor.write(data)
+                        break
+                    }
+                }
+            }
+            try await taskGroup.waitForAll()
+        }
+    }
 }

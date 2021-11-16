@@ -54,14 +54,19 @@ public actor InputStreamActor: NSObject {
         let bufferSize = Self.singleReadBufferSize
         var buffer = [UInt8](repeating: 0, count: bufferSize)
         
+        guard input.hasBytesAvailable else {
+            return // nothing to read
+        }
+        
         while input.hasBytesAvailable == true {
             let bytesRead = input.read(&buffer, maxLength: bufferSize)
+            /// avoid looping when stream reports `hasBytesAvailable` but returns none 
+            guard bytesRead > 0 else {
+                return
+            }
             readData.append(buffer, count: bytesRead)
         }
         
-        guard readData.count > 0 else {
-            return // nothing read
-        }
         yield?(readData)
     }
     

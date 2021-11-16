@@ -56,6 +56,10 @@ public actor OutputStreamActor: NSObject {
         guard output.streamStatus == Stream.Status.open else {
             throw StreamActorError.NotOpen
         }
+        /// avoid signalling `hasSpaceAvailable(false)` when it is already false
+        guard output.hasSpaceAvailable else {
+            return 0
+        }
         var totalBytesWritten = 0
         try data.withUnsafeBytes { unsafeRawBufferPointer in
             guard let unsafeBasePointer = unsafeRawBufferPointer.bindMemory(to: UInt8.self).baseAddress else {
