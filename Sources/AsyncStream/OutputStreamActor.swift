@@ -41,7 +41,19 @@ public actor OutputStreamActor: NSObject {
         output.open()
     }
     
-    public func getSpaceAvailableStream()-> AsyncThrowingStream<Bool, Error> {
+    public func setWriteDataStream(_ writeDataStream: AsyncStream<Data>) {
+        Task {
+            for await writeData in writeDataStream {
+                do {
+                    try await writeWhenSpaceAvailable(writeData)
+                } catch {
+                    break
+                }
+            }
+        }
+    }
+    
+    func getSpaceAvailableStream()-> AsyncThrowingStream<Bool, Error> {
         AsyncThrowingStream<Bool, Error> { continuation in
             yield = { spaceAvailable in
                 continuation.yield(spaceAvailable)
@@ -52,7 +64,23 @@ public actor OutputStreamActor: NSObject {
         }
     }
     
-    public func write(_ data: Data) throws -> Int {
+    func writeWhenSpaceAvailable(_ data: Data) async throws {
+#if DEBUG
+        print(#function, data.count)
+#endif
+        let bytesWritten = try write(data)
+        if bytesWritten != data.count {
+            let unwrittenData = data.dropFirst(bytesWritten)
+            for try await spaceAvailable in getSpaceAvailableStream() {
+                if spaceAvailable {
+                    try await writeWhenSpaceAvailable(unwrittenData)
+                    break
+                }
+            }
+        }
+    }
+    
+    func write(_ data: Data) throws -> Int {
         guard output.streamStatus == Stream.Status.open else {
             throw StreamActorError.NotOpen
         }

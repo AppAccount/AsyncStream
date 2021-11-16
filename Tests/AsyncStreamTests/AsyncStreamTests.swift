@@ -1,5 +1,5 @@
 import XCTest
-import AsyncStream
+@testable import AsyncStream
 
 final class AsyncStreamTests: XCTestCase {
     #if os(macOS)
@@ -187,6 +187,60 @@ final class AsyncStreamTests: XCTestCase {
                         let _ = try await outputActor.write(data)
                         break
                     }
+                }
+            }
+            try await taskGroup.waitForAll()
+        }
+    }
+    
+    func testStreamWrite() async throws {
+        let outputActor = OutputStreamActor(outputStream)
+        let inputActor = InputStreamActor(inputStream)
+        let readStream = await inputActor.getReadDataStream()
+        let size = Self.streamBufferSize << 2
+        let data = Data.init(count: size)
+        let writeDataStream = AsyncStream<Data> { continuation in
+            let yieldResult = continuation.yield(data)
+            guard case AsyncStream<Data>.Continuation.YieldResult.enqueued = yieldResult else {
+                XCTFail()
+                return
+            }
+            continuation.finish()
+        }
+        try await withThrowingTaskGroup(of: Void.self) { taskGroup in
+            taskGroup.addTask {
+                await outputActor.setWriteDataStream(writeDataStream)
+            }
+            taskGroup.addTask {
+                var readSize = 0
+                for try await receivedMessage in readStream {
+                    readSize += receivedMessage.count
+                    if readSize >= size {
+                        break
+                    }
+                }
+            }
+            try await taskGroup.waitForAll()
+        }
+    }
+    
+    func testStreamWriteFinish() async throws {
+        let outputActor = OutputStreamActor(outputStream)
+        let inputActor = InputStreamActor(inputStream)
+        let readStream = await inputActor.getReadDataStream()
+        let writeDataStream = AsyncStream<Data> { continuation in
+            let size = Self.streamBufferSize << 2
+            let data = Data.init(count: size)
+            continuation.yield(data)
+        }
+        try await withThrowingTaskGroup(of: Void.self) { taskGroup in
+            taskGroup.addTask {
+                await outputActor.setWriteDataStream(writeDataStream)
+            }
+            taskGroup.addTask {
+                for try await _ in readStream {
+                    self.inputStream.close()
+                    break
                 }
             }
             try await taskGroup.waitForAll()
