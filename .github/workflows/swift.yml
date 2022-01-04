@@ -13,6 +13,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: Select Xcode 13.2 for backward compatible Swift concurrency
+      run: sudo xcode-select -switch /Applications/Xcode_13.2.app
     - name: Build
       run: swift build -v
     - name: Run tests
