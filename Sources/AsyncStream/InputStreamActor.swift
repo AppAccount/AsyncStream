@@ -83,24 +83,31 @@ extension InputStreamActor: StreamDelegate {
         guard aStream is InputStream else {
             fatalError("\(#function) Expected InputStream")
         }
-#if DEBUG
-        print(#function, "InputStream" , eventCode)
-#endif
-        switch eventCode {
-        case Stream.Event.hasBytesAvailable:
-            Task.detached { [weak self] in
-                await self?.read()
+        Task { [weak self] in
+            guard let strongSelf = self else {
+                return
             }
-        case Stream.Event.errorOccurred:
-            Task.detached { [weak self] in
-                await self?.finish?()
+            var handledEventCodeName: String?
+            if eventCode.contains(.openCompleted) {
+                handledEventCodeName = "openCompleted"
             }
-        case Stream.Event.endEncountered:
-            Task.detached { [weak self] in
-                await self?.finish?()
+            if eventCode.contains(.hasBytesAvailable) {
+                handledEventCodeName = "hasBytesAvailable"
+                await strongSelf.read()
             }
-        default:
-            break
+            if eventCode.contains(.errorOccurred) {
+                handledEventCodeName = "errorOccurred"
+                await strongSelf.finish?()
+            }
+            if eventCode.contains(.endEncountered) {
+                handledEventCodeName = "endEncountered"
+                await strongSelf.finish?()
+            }
+    #if DEBUG
+            if let handledEventCodeName = handledEventCodeName {
+                print(type(of: strongSelf), #function, handledEventCodeName, eventCode)
+            }
+    #endif
         }
     }
 }

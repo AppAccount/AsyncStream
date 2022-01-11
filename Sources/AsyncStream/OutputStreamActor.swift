@@ -127,24 +127,31 @@ extension OutputStreamActor: StreamDelegate {
         guard aStream is OutputStream else {
             fatalError("\(#function) Expected OutputStream")
         }
+        Task { [weak self] in
+            guard let strongSelf = self else {
+                return
+            }
+            var handledEventCodeName: String?
+            if eventCode.contains(.openCompleted) {
+                handledEventCodeName = "openCompleted"
+            }
+            if eventCode.contains(.hasSpaceAvailable) {
+                handledEventCodeName = "hasSpaceAvailable"
+                await strongSelf.hasSpaceAvailable(true)
+            }
+            if eventCode.contains(.errorOccurred) {
+                handledEventCodeName = "errorOccurred"
+                await strongSelf.finish?()
+            }
+            if eventCode.contains(.endEncountered) {
+                handledEventCodeName = "endEncountered"
+                await strongSelf.finish?()
+            }
 #if DEBUG
-        print(#function, "OutputStream" , eventCode)
+            if let handledEventCodeName = handledEventCodeName {
+                print(type(of: strongSelf), #function, handledEventCodeName, eventCode)
+            }
 #endif
-        switch eventCode {
-        case Stream.Event.hasSpaceAvailable:
-            Task.detached { [weak self] in
-                await self?.hasSpaceAvailable(true)
-            }
-        case Stream.Event.errorOccurred:
-            Task.detached { [weak self] in
-                await self?.finish?()
-            }
-        case Stream.Event.endEncountered:
-            Task.detached { [weak self] in
-                await self?.finish?()
-            }
-        default:
-            break
         }
     }
 }
