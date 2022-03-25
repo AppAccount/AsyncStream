@@ -32,6 +32,17 @@ public actor OutputStreamActor: NSObject {
     private let output: OutputStream
     private var yield: ((Bool)->())?
     private var finish:(()->())?
+    private var writeDataStreamTask: Task<(), Never>?
+    private lazy var spaceAvailableStream: AsyncThrowingStream<Bool, Error> = {
+        AsyncThrowingStream<Bool, Error> { continuation in
+            yield = { spaceAvailable in
+                continuation.yield(spaceAvailable)
+            }
+            finish = { [weak self] in
+                continuation.finish(throwing: self?.output.streamError)
+            }
+        }
+    }()
     
     public init(_ output: OutputStream) {
         self.output = output
@@ -41,8 +52,14 @@ public actor OutputStreamActor: NSObject {
         output.open()
     }
     
-    public func setWriteDataStream(_ writeDataStream: AsyncStream<Data>) {
-        Task {
+    public func setWriteDataStream(_ writeDataStream: AsyncStream<Data>?) async {
+        if let task = writeDataStreamTask, !task.isCancelled {
+            _ = await task.result
+        }
+        guard let writeDataStream = writeDataStream else {
+            return
+        }
+        writeDataStreamTask = Task {
             for await writeData in writeDataStream {
                 do {
                     try await writeWhenSpaceAvailable(writeData)
@@ -54,28 +71,21 @@ public actor OutputStreamActor: NSObject {
     }
     
     func getSpaceAvailableStream()-> AsyncThrowingStream<Bool, Error> {
-        AsyncThrowingStream<Bool, Error> { continuation in
-            yield = { spaceAvailable in
-                continuation.yield(spaceAvailable)
-            }
-            finish = { [weak self] in
-                continuation.finish(throwing: self?.output.streamError)
-            }
-        }
+        spaceAvailableStream
     }
     
     func writeWhenSpaceAvailable(_ data: Data) async throws {
 #if DEBUG
-        print(#function, data.count)
+        print(type(of: self), #function, data.count)
 #endif
-        let bytesWritten = try write(data)
-        if bytesWritten != data.count {
-            let unwrittenData = data.dropFirst(bytesWritten)
-            for try await spaceAvailable in getSpaceAvailableStream() {
-                if spaceAvailable {
+        for try await spaceAvailable in spaceAvailableStream {
+            if spaceAvailable {
+                let bytesWritten = try write(data)
+                if bytesWritten != data.count {
+                    let unwrittenData = data.dropFirst(bytesWritten)
                     try await writeWhenSpaceAvailable(unwrittenData)
-                    break
                 }
+                break
             }
         }
     }
@@ -111,6 +121,7 @@ public actor OutputStreamActor: NSObject {
     }
     
     private func hasSpaceAvailable(_ value: Bool) {
+        assert(yield != nil)
         yield?(value)
     }
     

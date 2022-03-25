@@ -1,6 +1,14 @@
 import XCTest
 @testable import AsyncStream
 
+extension XCTestCase {
+    func testDealloc(_ object: AnyObject) {
+        addTeardownBlock { [weak object] in
+            XCTAssertNil(object)
+        }
+    }
+}
+    
 final class AsyncStreamTests: XCTestCase {
     #if os(macOS)
     /// on macOS Monterey, `getBoundStreams` derived streams sometimes incur a 5s-15s startup delay
@@ -45,6 +53,23 @@ final class AsyncStreamTests: XCTestCase {
         runLoopTask.cancel()
     }
     
+    func testDealloc() async throws {
+        var outputActor: OutputStreamActor? = OutputStreamActor(outputStream)
+        testDealloc(outputActor!)
+        let writeReadyStream = await outputActor!.getSpaceAvailableStream()
+        for try await writeReady in writeReadyStream {
+            if writeReady {
+                if let outputActor = outputActor {
+                    let size = Self.streamBufferSize >> 2
+                    let data = Data.init(count: size)
+                    let bytesWritten = try await outputActor.write(data)
+                    XCTAssert(bytesWritten == size)
+                }
+                outputActor = nil
+            }
+        }
+    }
+    
     func testSingleWrite() async throws {
         let outputActor = OutputStreamActor(outputStream)
         let writeReadyStream = await outputActor.getSpaceAvailableStream()
@@ -60,142 +85,147 @@ final class AsyncStreamTests: XCTestCase {
     }
     
     func testWriteUntilFull() async throws {
-        let outputActor = OutputStreamActor(outputStream)
-        let writeReadyStream = await outputActor.getSpaceAvailableStream()
+        var outputActor: OutputStreamActor? = OutputStreamActor(outputStream)
+        testDealloc(outputActor!)
+        let writeReadyStream = await outputActor!.getSpaceAvailableStream()
         var totalBytesWritten = 0
         for try await writeReady in writeReadyStream {
             if writeReady {
                 let size = Self.streamBufferSize >> 2
                 let data = Data.init(count: size)
-                let bytesWritten = try await outputActor.write(data)
+                let bytesWritten = try await outputActor!.write(data)
                 XCTAssert(bytesWritten == size)
                 totalBytesWritten += bytesWritten
             } else {
                 XCTAssert(totalBytesWritten == Self.streamBufferSize)
-                break
+                outputActor = nil
             }
         }
     }
     
     func testSingleWriteAndRead() async throws {
         let inputActor = InputStreamActor(inputStream)
-        let outputActor = OutputStreamActor(outputStream)
+        var outputActor: OutputStreamActor? = OutputStreamActor(outputStream)
+        testDealloc(inputActor)
+        testDealloc(outputActor!)
         let readStream = await inputActor.getReadDataStream()
-        let writeReadyStream = await outputActor.getSpaceAvailableStream()
+        let writeReadyStream = await outputActor!.getSpaceAvailableStream()
         let messageSize = Self.streamBufferSize >> 2
         let messageData = Data.init(repeating: 0x55, count: messageSize)
-        try await withThrowingTaskGroup(of: Void.self) { taskGroup in
-            taskGroup.addTask {
-                for try await writeReady in writeReadyStream {
-                    if writeReady {
-                        let bytesWritten = try await outputActor.write(messageData)
-                        XCTAssert(bytesWritten == messageSize)
-                        break
-                    }
-                }
+        Task {
+            for try await receivedMessage in readStream {
+                XCTAssert(receivedMessage == messageData)
+                break
             }
-            taskGroup.addTask {
-                for try await receivedMessage in readStream {
-                    XCTAssert(receivedMessage == messageData)
-                    break
+        }
+        for try await writeReady in writeReadyStream {
+            if writeReady {
+                if let outputActor = outputActor {
+                    let bytesWritten = try await outputActor.write(messageData)
+                    XCTAssert(bytesWritten == messageSize)
                 }
+                outputActor = nil
             }
-            try await taskGroup.waitForAll()
         }
     }
     
     func testMultipleWriteAndRead() async throws {
         let inputActor = InputStreamActor(inputStream)
-        let outputActor = OutputStreamActor(outputStream)
+        var outputActor: OutputStreamActor? = OutputStreamActor(outputStream)
+        testDealloc(inputActor)
+        testDealloc(outputActor!)
         let readStream = await inputActor.getReadDataStream()
-        let writeReadyStream = await outputActor.getSpaceAvailableStream()
+        let writeReadyStream = await outputActor!.getSpaceAvailableStream()
         let writeSize = Self.streamBufferSize
         let writeMessageSize = writeSize >> 2
         let writeData = Data.init(repeating: 0x55, count: writeSize)
-        try await withThrowingTaskGroup(of: Void.self) { taskGroup in
-            taskGroup.addTask {
-                var totalBytesWritten = 0
-                for try await writeReady in writeReadyStream {
-                    if writeReady {
-                        let range = Range(NSMakeRange(totalBytesWritten, writeMessageSize))!
-                        let bytesWritten = try await outputActor.write(writeData[range])
-                        XCTAssert(bytesWritten == writeMessageSize)
-                        totalBytesWritten += bytesWritten
-                        if totalBytesWritten >= Self.streamBufferSize {
-                            break
-                        }
-                    }
+        Task {
+            var bytesRead = 0
+            for try await readMessage in readStream {
+                let range = Range(NSMakeRange(bytesRead, readMessage.count))!
+                if readMessage != writeData[range] {
+                    XCTFail("read mismatch")
+                    break
+                }
+                bytesRead += readMessage.count
+                if bytesRead >= Self.streamBufferSize {
+                    break
                 }
             }
-            taskGroup.addTask {
-                var bytesRead = 0
-                for try await readMessage in readStream {
-                    let range = Range(NSMakeRange(bytesRead, readMessage.count))!
-                    if readMessage != writeData[range] {
-                        XCTFail("read mismatch")
-                        break
-                    }
-                    bytesRead += readMessage.count
-                    if bytesRead >= Self.streamBufferSize {
-                        break
-                    }
+        }
+        var totalBytesWritten = 0
+        for try await writeReady in writeReadyStream {
+            if writeReady {
+                if let outputActor = outputActor {
+                    let range = Range(NSMakeRange(totalBytesWritten, writeMessageSize))!
+                    let bytesWritten = try await outputActor.write(writeData[range])
+                    XCTAssert(bytesWritten == writeMessageSize)
+                    totalBytesWritten += bytesWritten
+                }
+                if totalBytesWritten >= Self.streamBufferSize {
+                    outputActor = nil
                 }
             }
-            try await taskGroup.waitForAll()
         }
     }
     
     func testWriteToClosedStream() async throws {
-        let outputActor = OutputStreamActor(outputStream)
-        let writeReadyStream = await outputActor.getSpaceAvailableStream()
-        for try await _ in writeReadyStream {
-            outputStream.close()
-            let size = Self.streamBufferSize >> 2
-            let data = Data.init(count: size)
-            do {
-                let _ = try await outputActor.write(data)
-            } catch (let error) {
-                guard let error = error as? StreamActorError, error == .NotOpen else {
-                    XCTFail()
-                    return
+        var outputActor: OutputStreamActor? = OutputStreamActor(outputStream)
+        testDealloc(outputActor!)
+        let writeReadyStream = await outputActor!.getSpaceAvailableStream()
+        for try await writeReady in writeReadyStream {
+            if writeReady {
+                if let outputActor = outputActor {
+                    let size = Self.streamBufferSize >> 2
+                    let data = Data.init(count: size)
+                    let bytesWritten = try await outputActor.write(data)
+                    XCTAssert(bytesWritten == size)
+                    outputStream.close()
+                    do {
+                        let _ = try await outputActor.write(data)
+                        XCTFail("write to closed stream should have taken an exception") // expect exception above
+                    } catch (let error) {
+                        XCTAssert(error as? StreamActorError == .NotOpen)
+                    }
                 }
-                break
+                outputActor = nil
             }
         }
     }
     
     func testReadStreamFinish() async throws {
-        let outputActor = OutputStreamActor(outputStream)
-        let writeReadyStream = await outputActor.getSpaceAvailableStream()
+        var outputActor: OutputStreamActor? = OutputStreamActor(outputStream)
         let inputActor = InputStreamActor(inputStream)
+        testDealloc(inputActor)
+        testDealloc(outputActor!)
+        let writeReadyStream = await outputActor!.getSpaceAvailableStream()
         let readStream = await inputActor.getReadDataStream()
-        try await withThrowingTaskGroup(of: Void.self) { taskGroup in
-            taskGroup.addTask {
-                var closed = false
-                for try await _ in readStream {
-                    if !closed {
-                        closed = true
-                        self.outputStream.close()
-                    }
+        Task {
+            var closed = false
+            for try await _ in readStream {
+                if !closed {
+                    closed = true
+                    self.outputStream.close()
                 }
             }
-            taskGroup.addTask {
-                for try await writeReady in writeReadyStream {
-                    if writeReady {
-                        let size = Self.streamBufferSize >> 2
-                        let data = Data.init(count: size)
-                        let _ = try await outputActor.write(data)
-                        break
-                    }
+        }
+        for try await writeReady in writeReadyStream {
+            if writeReady {
+                if let outputActor = outputActor {
+                    let size = Self.streamBufferSize >> 2
+                    let data = Data.init(count: size)
+                    let _ = try await outputActor.write(data)
                 }
+                outputActor = nil
             }
-            try await taskGroup.waitForAll()
         }
     }
     
     func testStreamWrite() async throws {
-        let outputActor = OutputStreamActor(outputStream)
+        var outputActor: OutputStreamActor? = OutputStreamActor(outputStream)
         let inputActor = InputStreamActor(inputStream)
+        testDealloc(inputActor)
+        testDealloc(outputActor!)
         let readStream = await inputActor.getReadDataStream()
         let size = Self.streamBufferSize << 2
         let data = Data.init(count: size)
@@ -207,43 +237,40 @@ final class AsyncStreamTests: XCTestCase {
             }
             continuation.finish()
         }
-        try await withThrowingTaskGroup(of: Void.self) { taskGroup in
-            taskGroup.addTask {
-                await outputActor.setWriteDataStream(writeDataStream)
+        await outputActor!.setWriteDataStream(writeDataStream)
+        var readSize = 0
+        for try await receivedMessage in readStream {
+            readSize += receivedMessage.count
+            print("read \(readSize)")
+            if readSize >= size {
+                break
             }
-            taskGroup.addTask {
-                var readSize = 0
-                for try await receivedMessage in readStream {
-                    readSize += receivedMessage.count
-                    if readSize >= size {
-                        break
-                    }
-                }
-            }
-            try await taskGroup.waitForAll()
+        }
+        await outputActor!.setWriteDataStream(nil)
+        let writeReadyStream = await outputActor!.getSpaceAvailableStream()
+        for try await _ in writeReadyStream {
+            outputActor = nil
         }
     }
     
     func testStreamWriteFinish() async throws {
         let outputActor = OutputStreamActor(outputStream)
         let inputActor = InputStreamActor(inputStream)
+        testDealloc(inputActor)
+        testDealloc(outputActor)
         let readStream = await inputActor.getReadDataStream()
         let writeDataStream = AsyncStream<Data> { continuation in
             let size = Self.streamBufferSize << 2
             let data = Data.init(count: size)
             continuation.yield(data)
         }
-        try await withThrowingTaskGroup(of: Void.self) { taskGroup in
-            taskGroup.addTask {
-                await outputActor.setWriteDataStream(writeDataStream)
-            }
-            taskGroup.addTask {
-                for try await _ in readStream {
-                    self.inputStream.close()
-                    break
-                }
-            }
-            try await taskGroup.waitForAll()
+        await outputActor.setWriteDataStream(writeDataStream)
+        for try await _ in readStream {
+            self.inputStream.close()
+            break
         }
+        await outputActor.setWriteDataStream(nil)
+        let writeReadyStream = await outputActor.getSpaceAvailableStream()
+        for try await _ in writeReadyStream {}
     }
 }
