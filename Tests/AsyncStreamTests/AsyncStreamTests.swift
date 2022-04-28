@@ -273,4 +273,45 @@ final class AsyncStreamTests: XCTestCase {
         let writeReadyStream = await outputActor.getSpaceAvailableStream()
         for try await _ in writeReadyStream {}
     }
+    
+    func testMultiStreamWrite() async throws {
+        var outputActor: OutputStreamActor? = OutputStreamActor(outputStream)
+        let inputActor = InputStreamActor(inputStream)
+        testDealloc(inputActor)
+        testDealloc(outputActor!)
+        let readStream = await inputActor.getReadDataStream()
+        let size = Self.streamBufferSize << 2
+        let data = Data.init(count: size)
+        let firstWriteDataStream = AsyncStream<Data> { continuation in
+            let yieldResult = continuation.yield(data)
+            guard case AsyncStream<Data>.Continuation.YieldResult.enqueued = yieldResult else {
+                XCTFail()
+                return
+            }
+            continuation.finish()
+        }
+        let secondWriteDataStream = AsyncStream<Data> { continuation in
+            let yieldResult = continuation.yield(data)
+            guard case AsyncStream<Data>.Continuation.YieldResult.enqueued = yieldResult else {
+                XCTFail()
+                return
+            }
+            continuation.finish()
+        }
+        let _ = await outputActor!.setWriteDataStream(firstWriteDataStream)
+        let _ = await outputActor!.setWriteDataStream(secondWriteDataStream)
+        var readSize = 0
+        for try await receivedMessage in readStream {
+            readSize += receivedMessage.count
+            print("read \(readSize)")
+            if readSize >= size*2 {
+                break
+            }
+        }
+        await outputActor!.setWriteDataStream(nil)
+        let writeReadyStream = await outputActor!.getSpaceAvailableStream()
+        for try await _ in writeReadyStream {
+            outputActor = nil
+        }
+    }
 }
